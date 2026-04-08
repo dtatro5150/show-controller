@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Show Controller Pro | Performance Rig</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=JetBrains+Mono:wght@500;800&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #09090b; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+        // --- GIG DATA ---
+        const MOCK_TRACKS = [
+            { id: "1", title: "Midnight Rider", duration: 180, light_preset: "Warm Amber", dmx_values: [255, 191, 0, 50], file_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" },
+            { id: "2", title: "Blueberry Hill", duration: 210, light_preset: "Deep Blue", dmx_values: [0, 0, 255, 30], file_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3" },
+            { id: "3", title: "Sultans of Swing", duration: 345, light_preset: "Rock Red", dmx_values: [255, 0, 0, 100], file_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3" },
+        ];
+
+        const formatTime = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
+
+        function App() {
+            const audioRef = useRef(new Audio());
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [activeIndex, setActiveIndex] = useState(0);
+            const [currentTime, setCurrentTime] = useState(0);
+            const [bigFontMode, setBigFontMode] = useState(false);
+            const [lastMidiNote, setLastMidiNote] = useState(null);
+            const [dmxChannels, setDmxChannels] = useState([0, 0, 0, 0]);
+
+            const activeTrack = MOCK_TRACKS[activeIndex];
+            const duration = activeTrack.duration;
+
+            // --- PROGRESS CALCULATION ---
+            const showMetrics = useMemo(() => {
+                const totalDuration = MOCK_TRACKS.reduce((acc, t) => acc + t.duration, 0);
+                const elapsedBefore = MOCK_TRACKS.slice(0, activeIndex).reduce((acc, t) => acc + t.duration, 0);
+                const totalElapsed = elapsedBefore + currentTime;
+                return {
+                    percent: Math.round(Math.min((totalElapsed / totalDuration) * 100, 100)),
+                    remaining: totalDuration - totalElapsed
+                };
+            }, [activeIndex, currentTime]);
+
+            useEffect(() => {
+                const audio = audioRef.current;
+                const update = () => setCurrentTime(audio.currentTime);
+                audio.addEventListener("timeupdate", update);
+                audio.addEventListener("ended", () => playTrack((activeIndex + 1) % MOCK_TRACKS.length));
+                
+                // MIDI API Initialization
+                if (navigator.requestMIDIAccess) {
+                    navigator.requestMIDIAccess().then(midi => {
+                        for (let input of midi.inputs.values()) {
+                            input.onmidimessage = (msg) => {
+                                const [status, note, vel] = msg.data;
+                                if (status === 144 && vel > 0) setLastMidiNote(note);
+                            };
+                        }
+                    });
+                }
+                return () => audio.removeEventListener("timeupdate", update);
+            }, [activeIndex]);
+
+            const playTrack = useCallback(async (index) => {
+                const track = MOCK_TRACKS[index];
+                if (!track) return;
+                setActiveIndex(index);
+                setDmxChannels(track.dmx_values);
+                audioRef.current.src = track.file_url;
+                audioRef.current.load();
+                try { await audioRef.current.play(); setIsPlaying(true); } catch (e) {}
+            }, []);
+
+            if (bigFontMode) {
+                return (
+                    <div className="h-screen bg-black text-white p-12 flex flex-col justify-between overflow-hidden">
+                        <div className="flex justify-between items-start">
+                            <button onClick={() => setBigFontMode(false)} className="text-zinc-600 border border-zinc-800 px-6 py-2 rounded-full text-xs font-black uppercase">Exit Performance View</button>
+                            <div className="text-right">
+                                <div className="text-zinc-500 text-[10px] uppercase font-black">Set Progress</div>
+                                <div className="text-amber-500 text-3xl font-black">{showMetrics.percent}%</div>
+                            </div>
+                        </div>
+                        <div className="text-center">
+                            <h2 className="text-6xl md:text-8xl font-black text-zinc-700 uppercase mb-4">{activeTrack.title}</h2>
+                            <div className="text-[18rem] md:text-[24rem] font-mono font-black text-amber-600 leading-none">
+                                {formatTime(duration - currentTime)}
+                            </div>
+                        </div>
+                        <div className="w-full h-4 bg-zinc-900 rounded-full overflow-hidden">
+                            <div className="h-full bg-zinc-600 transition-all duration-1000" style={{ width: `${showMetrics.percent}%` }} />
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen text-zinc-300 p-8">
+                    <header className="max-w-6xl mx-auto flex justify-between items-center mb-12">
+                        <div>
+                            <h1 className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.4em]">Show Controller Pro</h1>
+                            <div className="text-xl font-black text-zinc-100">DTATRO RIG v1.0</div>
+                        </div>
+                        <button onClick={() => setBigFontMode(true)} className="bg-amber-600 hover:bg-amber-500 text-white px-8 py-3 rounded-full text-[10px] font-black uppercase transition-all shadow-xl shadow-amber-900/20">Enter Performance Mode</button>
+                    </header>
+
+                    <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <section className="bg-zinc-900/40 rounded-3xl border border-zinc-800/50 p-6">
+                            <h3 className="text-[10px] font-black uppercase text-zinc-500 mb-6">Live Setlist</h3>
+                            {MOCK_TRACKS.map((t, i) => (
+                                <button key={t.id} onClick={() => playTrack(i)} className={`w-full text-left p-4 mb-3 rounded-2xl border transition-all ${i === activeIndex ? 'bg-amber-600/10 border-amber-600/40 text-amber-500' : 'bg-zinc-800/20 border-transparent hover:border-zinc-700'}`}>
+                                    <div className="font-black text-sm uppercase italic">{t.title}</div>
+                                    <div className="text-[10px] opacity-40 font-mono mt-1">{formatTime(t.duration)} | {t.light_preset}</div>
+                                </button>
+                            ))}
+                        </section>
+
+                        <section className="flex flex-col gap-8">
+                            <div className="bg-zinc-900/40 rounded-3xl border border-zinc-800/50 p-8 text-center">
+                                <div className="text-6xl font-mono font-black text-zinc-100 mb-8">{formatTime(currentTime)}</div>
+                                <button onClick={() => { isPlaying ? audioRef.current.pause() : audioRef.current.play(); setIsPlaying(!isPlaying); }} className="h-24 w-24 bg-zinc-100 text-black rounded-full text-3xl flex items-center justify-center mx-auto shadow-2xl hover:scale-110 transition-transform">
+                                    {isPlaying ? "▌▌" : "▶"}
+                                </button>
+                                <div className="mt-8 text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                                    Set Ends In: {formatTime(showMetrics.remaining)}
+                                </div>
+                            </div>
+                            {lastMidiNote && (
+                                <div className="bg-amber-600/5 border border-amber-600/20 p-4 rounded-2xl text-center">
+                                    <span className="text-[10px] font-black text-amber-500 uppercase">Incoming MIDI: Note {lastMidiNote}</span>
+                                </div>
+                            )}
+                        </section>
+
+                        <section className="bg-zinc-900/40 rounded-3xl border border-zinc-800/50 p-6 text-center">
+                            <h3 className="text-[10px] font-black uppercase text-zinc-500 mb-6 text-left">DMX State</h3>
+                            <div className="h-32 w-32 rounded-full mx-auto mb-8 shadow-inner border-4 border-zinc-800 flex items-center justify-center transition-all duration-1000" style={{ backgroundColor: `rgb(${dmxChannels[0]}, ${dmxChannels[1]}, ${dmxChannels[2]})`, boxShadow: `0 0 40px rgba(${dmxChannels[0]}, ${dmxChannels[1]}, ${dmxChannels[2]}, 0.4)` }}>
+                                <span className="text-[10px] font-black uppercase opacity-20">{activeTrack.light_preset}</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                {['R','G','B','W'].map((l, i) => (
+                                    <div key={l} className="bg-black/20 p-3 rounded-xl border border-zinc-800">
+                                        <div className="text-[9px] font-black text-zinc-600 mb-1">{l}</div>
+                                        <div className="text-lg font-mono text-zinc-300">{dmxChannels[i]}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
